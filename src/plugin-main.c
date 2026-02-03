@@ -22,13 +22,18 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 OBS_DECLARE_MODULE()
 OBS_MODULE_USE_DEFAULT_LOCALE(PLUGIN_NAME, "en-US")
 
+extern void register_audio_wave_source(void);
+
 bool obs_module_load(void)
 {
-	obs_log(LOG_INFO, "JDF's plugin loaded successfully (version %s)", PLUGIN_VERSION);
+	obs_log(LOG_INFO, "Began loading (version %s)", PLUGIN_VERSION);
+
+	register_audio_wave_source();
+
 	return true;
 }
 
 void obs_module_unload(void)
 {
-	obs_log(LOG_INFO, "JDF's plugin unloaded");
+	obs_log(LOG_INFO, "JDF's audio visualiser unloaded");
 }

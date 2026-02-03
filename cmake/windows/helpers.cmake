@@ -55,7 +55,7 @@ function(set_target_properties_plugin target)
   source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "UI Files" FILES ${target_ui_files})
 
   configure_file(cmake/windows/resources/resource.rc.in "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_PROJECT_NAME}.rc")
-  target_sources(${CMAKE_PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_PROJECT_NAME}.rc")
+  target_sources(${CMAKE_PROJECT_NAME} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_PROJECT_NAME}.rc" "src/audio-wave-source.c" "src/audio-wave-source.h")
 endfunction()
 
 # Helper function to add resources into bundle
@@ -71,7 +71,7 @@ function(target_install_resources target)
         OUTPUT_VARIABLE relative_path
       )
       cmake_path(GET relative_path PARENT_PATH relative_path)
-      target_sources(${target} PRIVATE "${data_file}")
+      target_sources(${target} PRIVATE "${data_file}" "src/audio-wave-source.c" "src/audio-wave-source.h")
       source_group("Resources/${relative_path}" FILES "${data_file}")
     endforeach()
 
