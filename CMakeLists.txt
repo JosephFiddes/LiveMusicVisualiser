@@ -38,6 +38,6 @@ if(ENABLE_QT)
   )
 endif()
 
-target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.c "src/audio-wave-source.c" "src/audio-wave-source.h")
+target_sources(${CMAKE_PROJECT_NAME} PRIVATE "src/plugin-main.cpp" "src/audio-wave-source.cpp" "src/audio-wave-source.hpp")
 
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})

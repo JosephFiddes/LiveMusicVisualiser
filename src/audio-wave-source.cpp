@@ -1,4 +1,4 @@
-#include "audio-wave-source.h"
+#include "audio-wave-source.hpp"
 
 /* Get the name of the audio wave source */
 static const char *aw_source_get_name(void* data) {
