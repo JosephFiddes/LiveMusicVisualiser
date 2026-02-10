@@ -22,13 +22,13 @@ static uint32_t auviz_source_get_width(void *data);
 static uint32_t auviz_source_get_height(void *data);
 
 static void add_parameter(std::string name, std::string disp_name, 
-	void (*on_create)(std::string name, std::string disp_name, auviz_source *data),
+	void (*on_create)(std::string name, std::string disp_name, auviz_source *s),
 	void (*get_default)(std::string name, std::string disp_name, obs_data_t *settings), 
 	void (*get_properties)(std::string name, std::string disp_name, obs_properties_t *props, 
-							auviz_source *data), 
-	void (*on_update)(std::string name, std::string disp_name, auviz_source *data,
+							auviz_source *s), 
+	void (*on_update)(std::string name, std::string disp_name, auviz_source *s,
 					    obs_data_t *settings),
-	void (*on_video_render)(std::string name, std::string disp_name, auviz_source *data)
+	void (*on_video_render)(std::string name, std::string disp_name, auviz_source *s)
 );
 
 static void audio_capture_cb(void* param, obs_source_t*, const struct audio_data* audio, bool muted) {
