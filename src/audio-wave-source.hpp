@@ -9,7 +9,18 @@
 #include <mutex>
 #include <cstdint>
 
+struct auviz_parameter;
 struct auviz_source;
+
+struct auviz_parameter_behaviour {
+	std::string name;
+	std::string disp_name;
+	void (*on_create)(std::string name, std::string disp_name, auviz_source *data);
+	void (*get_default)(std::string name, std::string disp_name, obs_data_t *settings);
+	void (*get_properties)(std::string name, std::string disp_name, obs_properties_t *props, auviz_source *data);
+	void (*on_update)(std::string name, std::string disp_name, auviz_source *data, obs_data_t *settings);
+	void (*on_video_render)(std::string name, std::string disp_name, auviz_source *data);
+};
 
 struct auviz_source {
 	obs_source_t *self = nullptr;
@@ -31,6 +42,9 @@ struct auviz_source {
 	// Core visual parameters
 	int width = 800;
 	int height = 200;
+
+	// Additional parameters
+	double example_parameter;
 
 	// Render-state guard (prevents update() vs video_render() races)
 	std::mutex render_mutex;
