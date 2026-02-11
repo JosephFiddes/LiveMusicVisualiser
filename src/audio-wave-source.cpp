@@ -2,8 +2,10 @@
 
 #include <util/platform.h>
 
+#define AUVIZ_ID "audio-viz"
+
 static struct obs_source_info auviz_source_info;
-static std::vector<auviz_parameter_behaviour *> parameters;
+static std::vector<auviz_parameter_behaviour *> parameter_behaviours;
 
 static void audio_capture_cb(void *param, obs_source_t *, const struct audio_data *audio, bool muted);
 static void attach_to_audio_source(auviz_source *s);
@@ -76,12 +78,12 @@ static void attach_to_audio_source(auviz_source *s)
 
 	release_audio_weak(s);
 
-	if (s->name.empty())
+	if (s->audio_source_name.empty())
 		return;
 
-	obs_source_t *target = obs_get_source_by_name(s->name.c_str());
+	obs_source_t *target = obs_get_source_by_name(s->audio_source_name.c_str());
 	if (!target) {
-		obs_log(LOG_WARNING, "Audio source '%s' not found", s->name.c_str());
+		obs_log(LOG_WARNING, "Audio source '%s' not found", s->audio_source_name.c_str());
 		return;
 	}
 
@@ -90,7 +92,7 @@ static void attach_to_audio_source(auviz_source *s)
 
 	obs_source_release(target);
 
-	obs_log(LOG_INFO, "Attached to audio source '%s'", s->name.c_str());
+	obs_log(LOG_INFO, "Attached to audio source '%s'", s->audio_source_name.c_str());
 }
 
 static void detach_from_audio_source(auviz_source *s)
@@ -130,8 +132,8 @@ static void *auviz_source_create(obs_data_t *settings, obs_source_t *source)
 	// Implementation code goes here.
 
 	// Call on_create for each parameter
-	for (int i=0; i<parameters.size(); ++i) {
-		auviz_parameter_behaviour *param = parameters[i];
+	for (int i = 0; i < parameter_behaviours.size(); ++i) {
+		auviz_parameter_behaviour *param = parameter_behaviours[i];
 		if (param->on_create)
 			param->on_create(param->name, param->disp_name, s);
 	}
@@ -181,8 +183,8 @@ static void auviz_source_destroy(void *data)
 /* Set the default settings for the audio wave source */
 static void auviz_source_get_defaults(obs_data_t *settings)
 {
-	for (int i = 0; i < parameters.size(); ++i) {
-		auviz_parameter_behaviour *param = parameters[i];
+	for (int i = 0; i < parameter_behaviours.size(); ++i) {
+		auviz_parameter_behaviour *param = parameter_behaviours[i];
 		if (param->get_default)
 			param->get_default(param->name, param->disp_name, settings);
 	}
@@ -197,8 +199,8 @@ static obs_properties_t *auviz_source_get_properties(void *data)
 	if (!s)
 		return props;
 
-	for (int i = 0; i < parameters.size(); ++i) {
-		auviz_parameter_behaviour *param = parameters[i];
+	for (int i = 0; i < parameter_behaviours.size(); ++i) {
+		auviz_parameter_behaviour *param = parameter_behaviours[i];
 		if (param->get_properties)
 			param->get_properties(param->name, param->disp_name, props, s);
 	}
@@ -236,16 +238,14 @@ static void auviz_source_update(void *data, obs_data_t *settings)
 
 	detach_from_audio_source(s);
 
-	s->name = obs_data_get_string(settings, "audio_source");
-
 	{
 		std::lock_guard<std::mutex> g(s->render_mutex);
 
 		s->width = static_cast<int>(obs_data_get_int(settings, "width"));
 		// do more updaty stuff
 
-		for (int i = 0; i < parameters.size(); ++i) {
-			auviz_parameter_behaviour *param = parameters[i];
+		for (int i = 0; i < parameter_behaviours.size(); ++i) {
+			auviz_parameter_behaviour *param = parameter_behaviours[i];
 			if (param->on_update)
 				param->on_update(param->name, param->disp_name, s, settings);
 		}
@@ -270,8 +270,29 @@ static void auviz_source_render(void *data, gs_effect_t *effect)
 
 		// Rendering implementation goes here
 
-		for (int i = 0; i < parameters.size(); ++i) {
-			auviz_parameter_behaviour *param = parameters[i];
+		if (s->num_samples > 0) {
+			float max_sample_max = 0.0f;
+
+			for (size_t i = 0; i < s->num_samples; ++i) {
+				float sample_left = s->samples_left[i];
+				float sample_right = s->samples_right[i];
+				float sample_max = std::max(std::abs(sample_left), std::abs(sample_right));
+
+				if (sample_max > max_sample_max) {
+					max_sample_max = sample_max;
+				}
+			}
+
+			obs_log(LOG_INFO, "New samples captured: %zu (max sample value: %f)",
+				s->num_samples, max_sample_max);
+		} else {
+			obs_log(LOG_INFO, "No new samples captured since last render");
+		}
+
+		// obs_log(LOG_INFO, "L%f.2 R%f.2", s->samples_left.back(), s->samples_right.back());
+
+		for (int i = 0; i < parameter_behaviours.size(); ++i) {
+			auviz_parameter_behaviour *param = parameter_behaviours[i];
 			if (param->on_video_render)
 				param->on_video_render(param->name, param->disp_name, s);
 		}
@@ -321,13 +342,13 @@ static void add_parameter(std::string name, std::string disp_name,
 	param->on_update = on_update;
 	param->on_video_render = on_video_render;
 
-	parameters.push_back(param);
+	parameter_behaviours.push_back(param);
 }
 
 void register_audio_viz_source() {
 	std::memset(&auviz_source_info, 0, sizeof(auviz_source_info));
 
-	auviz_source_info.id = "audio-viz";
+	auviz_source_info.id = AUVIZ_ID;
 	auviz_source_info.type = OBS_SOURCE_TYPE_INPUT;
 	auviz_source_info.output_flags = OBS_SOURCE_VIDEO;
 
@@ -348,6 +369,48 @@ void register_audio_viz_source() {
 
 	auviz_source_info.get_width = auviz_source_get_width;
 	auviz_source_info.get_height = auviz_source_get_height;
+
+	add_parameter(
+		"audio_source_name", "Audio Source Name",
+		// on_create: run when source is created.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+		},
+		// get_default: sets the default value of the parameter in settings.
+		[](std::string name, std::string disp_name, obs_data_t *settings) { 
+			obs_data_set_default_string(settings, name.c_str(), "");
+		},
+		// get_properties: adds the parameter to the properties list (e.g. for dropdowns or sliders).
+		[](std::string name, std::string disp_name, obs_properties_t *props, auviz_source *s) {
+			obs_property_t *p_list = obs_properties_add_list(props, name.c_str(), disp_name.c_str(), OBS_COMBO_TYPE_LIST,
+				OBS_COMBO_FORMAT_STRING);
+			obs_enum_sources(
+				[](void *data, obs_source_t *source) -> bool {
+					obs_property_t *prop = (obs_property_t *)data;
+
+					const char *id = obs_source_get_id(source);
+					if (id && std::strcmp(id, AUVIZ_ID) == 0)
+						return true;
+
+					if (!obs_source_audio_active(source))
+						return true;
+
+					const char *name = obs_source_get_name(source);
+					if (!name)
+						return true;
+
+					obs_property_list_add_string(prop, name, name);
+					return true;
+				},
+				p_list);
+		},
+		// on_update: run when the parameter is updated (e.g. slider moved).
+		[](std::string name, std::string disp_name, auviz_source *s, obs_data_t *settings) {
+			s->audio_source_name = obs_data_get_string(settings, name.c_str());
+		},
+		// on_video_render: run when the source is rendered.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+		});
+
 
 	add_parameter(
 		"example_parameter", "Example Parameter :)",

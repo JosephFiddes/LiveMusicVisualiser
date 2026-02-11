@@ -25,7 +25,7 @@ struct auviz_parameter_behaviour {
 struct auviz_source {
 	obs_source_t *self = nullptr;
 
-	std::string name;
+	std::string audio_source_name;
 	obs_weak_source_t *audio_weak = nullptr;
 
 	// Lifetime guards for audio callback (prevents use-after-free during destroy)
