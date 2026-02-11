@@ -349,7 +349,7 @@ void register_audio_viz_source() {
 	std::memset(&auviz_source_info, 0, sizeof(auviz_source_info));
 
 	auviz_source_info.id = AUVIZ_ID;
-	auviz_source_info.type = OBS_SOURCE_TYPE_INPUT;
+	auviz_source_info.type = OBS_SOURCE_TYPE_FILTER;
 	auviz_source_info.output_flags = OBS_SOURCE_VIDEO;
 
 	auviz_source_info.get_name = auviz_source_get_name;
