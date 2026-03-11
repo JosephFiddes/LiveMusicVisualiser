@@ -28,6 +28,8 @@ struct auviz_source {
 	std::string audio_source_name;
 	obs_weak_source_t *audio_weak = nullptr;
 
+	obs_sceneitem_t *sceneitem = nullptr;
+
 	// Lifetime guards for audio callback (prevents use-after-free during destroy)
 	std::atomic<bool> alive{true};
 	std::atomic<uint32_t> audio_cb_inflight{0};
@@ -44,7 +46,15 @@ struct auviz_source {
 	int height = 200;
 
 	// Additional parameters
-	double example_parameter;
+	double movement_strength;
+
+	// Effect parameters
+	gs_eparam_t *param_width;
+	gs_eparam_t *param_height;
+	gs_eparam_t *param_max_sample_max;
+	gs_eparam_t *param_movement_strength;
+	std::string shader_filepath;
+	gs_effect_t *effect = nullptr;
 
 	// Render-state guard (prevents update() vs video_render() races)
 	std::mutex render_mutex;

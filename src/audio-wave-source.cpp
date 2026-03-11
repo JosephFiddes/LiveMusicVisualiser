@@ -4,6 +4,8 @@
 
 #define AUVIZ_ID "audio-viz"
 
+#define SHADER_FILEPATH_NAME "shader_filepath"
+
 static struct obs_source_info auviz_source_info;
 static std::vector<auviz_parameter_behaviour *> parameter_behaviours;
 
@@ -22,6 +24,8 @@ static void auviz_source_update(void *data, obs_data_t *settings);
 static void auviz_source_render(void *data, gs_effect_t *effect);
 static uint32_t auviz_source_get_width(void *data);
 static uint32_t auviz_source_get_height(void *data);
+static bool compile_effect(auviz_source *s);
+static gs_eparam_t *gs_effect_get_param_by_name_ensure_success(gs_effect_t *effect, const char *name);
 
 static void add_parameter(std::string name, std::string disp_name, 
 	void (*on_create)(std::string name, std::string disp_name, auviz_source *s),
@@ -129,14 +133,11 @@ static void *auviz_source_create(obs_data_t *settings, obs_source_t *source)
 	auto *s = new auviz_source();
 	s->self = source;
 
-	// Implementation code goes here.
+	s->shader_filepath = obs_data_get_string(settings, SHADER_FILEPATH_NAME);
 
-	// Call on_create for each parameter
-	for (int i = 0; i < parameter_behaviours.size(); ++i) {
-		auviz_parameter_behaviour *param = parameter_behaviours[i];
-		if (param->on_create)
-			param->on_create(param->name, param->disp_name, s);
-	}
+	// Implementation code goes here.
+	// Compile the shader effect and get parameter references.
+	compile_effect(s);
 
 	auviz_source_update(s, settings);
 
@@ -266,13 +267,18 @@ static void auviz_source_render(void *data, gs_effect_t *effect)
 	{
 		std::lock_guard<std::mutex> g(s->render_mutex);
 
-		// for hlsl stuff: obs_source_process_filter_begin
+		obs_source_process_filter_begin(s->self, GS_RGBA, OBS_NO_DIRECT_RENDERING);
+		
+		obs_source_t *parent = obs_filter_get_parent(s->self);
+		s->width = obs_source_get_width(parent);
+		s->height = obs_source_get_height(parent);
 
 		// Rendering implementation goes here
 
+		// Get the peak value of the audio captured since the last render.
+		// (this should hopefully be a reasonably good approximation of the loudness)
+		float max_sample_max = 0.0f;
 		if (s->num_samples > 0) {
-			float max_sample_max = 0.0f;
-
 			for (size_t i = 0; i < s->num_samples; ++i) {
 				float sample_left = s->samples_left[i];
 				float sample_right = s->samples_right[i];
@@ -283,10 +289,15 @@ static void auviz_source_render(void *data, gs_effect_t *effect)
 				}
 			}
 
-			obs_log(LOG_INFO, "New samples captured: %zu (max sample value: %f)",
-				s->num_samples, max_sample_max);
+			//obs_log(LOG_INFO, "New samples captured: %zu (max sample value: %f)",
+			//	s->num_samples, max_sample_max);
 		} else {
-			obs_log(LOG_INFO, "No new samples captured since last render");
+			//obs_log(LOG_INFO, "No new samples captured since last render");
+		}
+
+		// Now set parameter only if it resolves correctly.
+		if (s->param_max_sample_max) {
+			gs_effect_set_float(s->param_max_sample_max, max_sample_max);
 		}
 
 		// obs_log(LOG_INFO, "L%f.2 R%f.2", s->samples_left.back(), s->samples_right.back());
@@ -297,7 +308,7 @@ static void auviz_source_render(void *data, gs_effect_t *effect)
 				param->on_video_render(param->name, param->disp_name, s);
 		}
 
-		// obs_source_process_filter_end
+		obs_source_process_filter_end(s->self, s->effect, s->width, s->height);
 	}
 }
 
@@ -345,6 +356,46 @@ static void add_parameter(std::string name, std::string disp_name,
 	parameter_behaviours.push_back(param);
 }
 
+/* Compiles the effect in s->shader_filepath */
+static bool compile_effect(auviz_source* s) {
+	obs_enter_graphics();
+
+	if (s->effect) {
+		gs_effect_destroy(s->effect);
+		s->effect = nullptr;
+	}
+	s->effect = gs_effect_create_from_file(s->shader_filepath.c_str(), NULL);
+
+	if (s->effect == NULL) {
+		obs_log(LOG_ERROR, "Effect compilation failed for %s", s->shader_filepath.c_str());
+		obs_leave_graphics();
+		return false;
+	}
+
+	// Get references to shader parameters (note: might make this a parameter from add_parameter())
+	s->param_max_sample_max = gs_effect_get_param_by_name_ensure_success(s->effect, "max_sample_max");
+
+	// Call on_create for each parameter
+	for (int i = 0; i < parameter_behaviours.size(); ++i) {
+		auviz_parameter_behaviour *param = parameter_behaviours[i];
+		if (param->on_create)
+			param->on_create(param->name, param->disp_name, s);
+	}
+	
+	obs_leave_graphics();
+
+	obs_log(LOG_INFO, "Effect compilation succeeded for %s", s->shader_filepath.c_str());
+	return true;
+}
+
+static gs_eparam_t *gs_effect_get_param_by_name_ensure_success(gs_effect_t *effect, const char *name) {
+	gs_eparam_t *param = gs_effect_get_param_by_name(effect, name);
+	if (!param) {
+		obs_log(LOG_ERROR, "Failed to get parameter '%s' from effect", name);
+	}
+	return param;
+}
+
 void register_audio_viz_source() {
 	std::memset(&auviz_source_info, 0, sizeof(auviz_source_info));
 
@@ -367,8 +418,8 @@ void register_audio_viz_source() {
 
 	auviz_source_info.video_render = auviz_source_render;
 
-	auviz_source_info.get_width = auviz_source_get_width;
-	auviz_source_info.get_height = auviz_source_get_height;
+	//auviz_source_info.get_width = auviz_source_get_width;
+	//auviz_source_info.get_height = auviz_source_get_height;
 
 	add_parameter(
 		"audio_source_name", "Audio Source Name",
@@ -413,10 +464,10 @@ void register_audio_viz_source() {
 
 
 	add_parameter(
-		"example_parameter", "Example Parameter :)",
+		"movement_strength", "Strength: ",
 		// on_create: run when source is created.
 		[](std::string name, std::string disp_name, auviz_source *s) { 
-			s->example_parameter = 0.5; 
+			s->param_movement_strength = gs_effect_get_param_by_name_ensure_success(s->effect, name.c_str());
 		},
 		// get_default: sets the default value of the parameter in settings.
 		[](std::string name, std::string disp_name, obs_data_t *settings) {
@@ -428,14 +479,81 @@ void register_audio_viz_source() {
 		},
 		// on_update: run when the parameter is updated (e.g. slider moved).
 		[](std::string name, std::string disp_name, auviz_source *s, obs_data_t *settings) {
-			s->example_parameter = obs_data_get_double(settings, name.c_str());
+			s->movement_strength = obs_data_get_double(settings, name.c_str());
 		},
 		// on_video_render: run when the source is rendered.
-		[](std::string name, std::string disp_name, auviz_source* s) {
-			// Runs every frame.
-			// obs_log(LOG_INFO, "%s: %d", disp_name.c_str(), s->example_parameter);
+		[](std::string name, std::string disp_name, auviz_source *s) {
+			gs_effect_set_float(s->param_movement_strength, (float)s->movement_strength);
 		}
 	);
+
+	add_parameter(
+		SHADER_FILEPATH_NAME, "Shader File: ",
+		// on_create: run when source is created.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+			// ON_CREATE CODE HERE
+		},
+		// get_default: sets the default value of the parameter in settings.
+		[](std::string name, std::string disp_name, obs_data_t *settings) {
+			obs_data_set_default_string(settings, name.c_str(), "");
+		},
+		// get_properties: adds the parameter to the properties list (e.g. for dropdowns or sliders).
+		[](std::string name, std::string disp_name, obs_properties_t *props, auviz_source *s) {
+			obs_properties_add_path(props, name.c_str(), disp_name.c_str(), OBS_PATH_FILE,
+				 "HLSL Files (*.hlsl);;All Files (*.*)", nullptr);
+		},
+		// on_update: run when the parameter is updated (e.g. slider moved).
+		[](std::string name, std::string disp_name, auviz_source *s, obs_data_t *settings) {
+			// Recompile the shader effect if the file path has changed.
+			std::string old_filepath = s->shader_filepath;
+			s->shader_filepath = obs_data_get_string(settings, name.c_str());
+			if (s->shader_filepath != old_filepath) {
+				compile_effect(s);
+			}
+		},
+		// on_video_render: run when the source is rendered.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+			// ON_VIDEO_RENDER CODE HERE
+		}
+	);
+
+	add_parameter(
+		"width", "width",
+		// on_create: run when source is created.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+			s->param_width =
+				gs_effect_get_param_by_name_ensure_success(s->effect, name.c_str());
+		},
+		// get_default: sets the default value of the parameter in settings.
+		[](std::string name, std::string disp_name, obs_data_t *settings) {
+		},
+		// get_properties: adds the parameter to the properties list (e.g. for dropdowns or sliders).
+		[](std::string name, std::string disp_name, obs_properties_t *props, auviz_source *s) {
+		},
+		// on_update: run when the parameter is updated (e.g. slider moved).
+		[](std::string name, std::string disp_name, auviz_source *s, obs_data_t *settings) {
+		},
+		// on_video_render: run when the source is rendered.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+			gs_effect_set_int(s->param_width, s->width);
+		});
+
+	add_parameter(
+		"height", "height",
+		// on_create: run when source is created.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+			s->param_height = gs_effect_get_param_by_name_ensure_success(s->effect, name.c_str());
+		},
+		// get_default: sets the default value of the parameter in settings.
+		[](std::string name, std::string disp_name, obs_data_t *settings) {},
+		// get_properties: adds the parameter to the properties list (e.g. for dropdowns or sliders).
+		[](std::string name, std::string disp_name, obs_properties_t *props, auviz_source *s) {},
+		// on_update: run when the parameter is updated (e.g. slider moved).
+		[](std::string name, std::string disp_name, auviz_source *s, obs_data_t *settings) {},
+		// on_video_render: run when the source is rendered.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+			gs_effect_set_int(s->param_height, s->height);
+		});
 
 	obs_register_source(&auviz_source_info);
 
