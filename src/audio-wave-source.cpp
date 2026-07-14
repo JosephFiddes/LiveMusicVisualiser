@@ -6,6 +6,10 @@
 
 #define SHADER_FILEPATH_NAME "shader_filepath"
 
+#define PI 3.14159265f
+
+////// Function Declarations
+
 static struct obs_source_info auviz_source_info;
 static std::vector<auviz_parameter_behaviour *> parameter_behaviours;
 
@@ -26,6 +30,10 @@ static uint32_t auviz_source_get_width(void *data);
 static uint32_t auviz_source_get_height(void *data);
 static bool compile_effect(auviz_source *s);
 static gs_eparam_t *gs_effect_get_param_by_name_ensure_success(gs_effect_t *effect, const char *name);
+
+static std::vector<float> fft(const std::vector<float> & samples);
+
+////// Function Definitions
 
 static void add_parameter(std::string name, std::string disp_name, 
 	void (*on_create)(std::string name, std::string disp_name, auviz_source *s),
@@ -178,6 +186,11 @@ static void auviz_source_destroy(void *data)
 		s->num_samples = 0;
 	}
 
+	obs_enter_graphics();
+	gs_texture_destroy(s->audio_freq_left_texture);
+	gs_texture_destroy(s->audio_freq_right_texture);
+	obs_leave_graphics();
+
 	delete s;
 }
 
@@ -260,13 +273,14 @@ static void auviz_source_render(void *data, gs_effect_t *effect)
 {
 	UNUSED_PARAMETER(effect);
 
+	static int32_t previous_fouriered_length = 0;
+
 	auto *s = static_cast<auviz_source *>(data);
 	if (!s)
 		return;
 
 	{
 		std::lock_guard<std::mutex> g(s->render_mutex);
-
 		obs_source_process_filter_begin(s->self, GS_RGBA, OBS_NO_DIRECT_RENDERING);
 		
 		obs_source_t *parent = obs_filter_get_parent(s->self);
@@ -274,39 +288,49 @@ static void auviz_source_render(void *data, gs_effect_t *effect)
 		s->height = obs_source_get_height(parent);
 
 		// Rendering implementation goes here
+		std::vector<float> fouriered_left = fft(s->samples_left);
+		std::vector<float> fouriered_right = fft(s->samples_right);
+		int32_t fouriered_length = static_cast<int32_t>(fouriered_left.size());
 
-		// Get the peak value of the audio captured since the last render.
-		// (this should hopefully be a reasonably good approximation of the loudness)
-		float max_sample_max = 0.0f;
-		if (s->num_samples > 0) {
-			for (size_t i = 0; i < s->num_samples; ++i) {
-				float sample_left = s->samples_left[i];
-				float sample_right = s->samples_right[i];
-				float sample_max = std::max(std::abs(sample_left), std::abs(sample_right));
+		//for (size_t i = 0; i < fouriered_length; i++) {
+		//	obs_log(LOG_INFO, "fourier %i: %f", i, fouriered_left[i]);
+		//}
 
-				if (sample_max > max_sample_max) {
-					max_sample_max = sample_max;
-				}
+		//Resize if necessary.
+		if (!s->audio_freq_left_texture || previous_fouriered_length != fouriered_length) {
+			if (s->audio_freq_left_texture) {
+				gs_texture_destroy(s->audio_freq_left_texture);
+				s->audio_freq_left_texture = nullptr;
 			}
-
-			//obs_log(LOG_INFO, "New samples captured: %zu (max sample value: %f)",
-			//	s->num_samples, max_sample_max);
-		} else {
-			//obs_log(LOG_INFO, "No new samples captured since last render");
+			s->audio_freq_left_texture = gs_texture_create(fouriered_length, 1, GS_R32F, 1, nullptr, GS_DYNAMIC);
 		}
 
-		// Now set parameter only if it resolves correctly.
-		if (s->param_max_sample_max) {
-			gs_effect_set_float(s->param_max_sample_max, max_sample_max);
+		uint8_t *ptr = nullptr;
+		uint32_t linesize = 0;
+
+		if (gs_texture_map(s->audio_freq_left_texture, &ptr, &linesize)) {
+			memcpy(ptr, fouriered_left.data(), fouriered_length * sizeof(float));
+			gs_texture_unmap(s->audio_freq_left_texture);
+
+			gs_effect_set_texture(s->param_samples_left, s->audio_freq_left_texture);
 		}
 
-		// obs_log(LOG_INFO, "L%f.2 R%f.2", s->samples_left.back(), s->samples_right.back());
+		if (gs_texture_map(s->audio_freq_right_texture, &ptr, &linesize)) {
+			memcpy(ptr, fouriered_right.data(), fouriered_length * sizeof(float));
+			gs_texture_unmap(s->audio_freq_right_texture);
+			
+			gs_effect_set_texture(s->param_samples_right, s->audio_freq_right_texture);
+		}
+
+		//obs_log(LOG_INFO, "L%f.2 R%f.2", s->samples_left.back(), s->samples_right.back());
 
 		for (int i = 0; i < parameter_behaviours.size(); ++i) {
 			auviz_parameter_behaviour *param = parameter_behaviours[i];
 			if (param->on_video_render)
 				param->on_video_render(param->name, param->disp_name, s);
 		}
+
+		previous_fouriered_length = fouriered_length;
 
 		obs_source_process_filter_end(s->self, s->effect, s->width, s->height);
 	}
@@ -373,7 +397,21 @@ static bool compile_effect(auviz_source* s) {
 	}
 
 	// Get references to shader parameters (note: might make this a parameter from add_parameter())
-	s->param_max_sample_max = gs_effect_get_param_by_name_ensure_success(s->effect, "max_sample_max");
+	s->param_samples_left = gs_effect_get_param_by_name_ensure_success(s->effect, "samples_left");
+	s->param_samples_right = gs_effect_get_param_by_name_ensure_success(s->effect, "samples_right");
+
+	// Reset textures.
+	if (s->audio_freq_left_texture) {
+		gs_texture_destroy(s->audio_freq_left_texture);
+		s->audio_freq_left_texture = nullptr;
+	}
+	if (s->audio_freq_right_texture) {
+		gs_texture_destroy(s->audio_freq_right_texture);
+		s->audio_freq_right_texture = nullptr;
+	}
+	// The 10 will likely be overwritten as the number of samples is inconsistant.
+	s->audio_freq_left_texture = gs_texture_create(10, 1, GS_R32F, 1, nullptr, GS_DYNAMIC);
+	s->audio_freq_right_texture = gs_texture_create(10, 1, GS_R32F, 1, nullptr, GS_DYNAMIC);
 
 	// Call on_create for each parameter
 	for (int i = 0; i < parameter_behaviours.size(); ++i) {
@@ -559,6 +597,56 @@ void register_audio_viz_source() {
 
 	obs_log(LOG_INFO, "audio visualiser (%s: %s) registered.", auviz_source_info.id,
 		auviz_source_info.get_name(0));
+}
+
+static size_t next_pow2(size_t n) {
+    size_t p = 1;
+    while (p < n) p <<= 1;
+    return p;
+}
+
+// Implementation of Fast Fourier Transform
+static std::vector<float> fft(const std::vector<float> & samples) {
+	int n = static_cast<int>(next_pow2(samples.size()));
+	std::vector<std::complex<float>> complex_samples = std::vector<std::complex<float>>(n, 0.0);
+
+	// Convert samples to complex number.
+	for (int i = 0; i < samples.size(); i++) {
+		complex_samples[i] = samples[i];
+	}
+
+	// Algorithm for FFT from https://cp-algorithms.com/algebra/fft.html
+    for (int i = 1, j = 0; i < n; i++) {
+        int bit = n >> 1;
+        for (; j & bit; bit >>= 1)
+            j ^= bit;
+        j ^= bit;
+
+        if (i < j)
+            std::swap(complex_samples[i], complex_samples[j]);
+    }
+
+    for (int len = 2; len <= n; len <<= 1) {
+        float ang = 2 * PI / len;
+        std::complex<float> wlen(cos(ang), sin(ang));
+        for (int i = 0; i < n; i += len) {
+            std::complex<float> w(1);
+            for (int j = 0; j < len / 2; j++) {
+                std::complex<float> u = complex_samples[i+j], v = complex_samples[i+j+len/2] * w;
+                complex_samples[i+j] = u + v;
+                complex_samples[i+j+len/2] = u - v;
+                w *= wlen;
+            }
+        }
+    }
+
+	// Discard imaginary part.
+	std::vector<float> result = std::vector<float>(n);
+	for (int i = 0; i < n; i++) {
+		result[i] = complex_samples[i].real();
+	}
+
+	return result;
 }
 
 /*

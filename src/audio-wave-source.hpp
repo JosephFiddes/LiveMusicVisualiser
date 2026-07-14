@@ -8,6 +8,7 @@
 #include <atomic>
 #include <mutex>
 #include <cstdint>
+#include <complex>
 
 struct auviz_parameter;
 struct auviz_source;
@@ -51,10 +52,13 @@ struct auviz_source {
 	// Effect parameters
 	gs_eparam_t *param_width;
 	gs_eparam_t *param_height;
-	gs_eparam_t *param_max_sample_max;
+	gs_eparam_t *param_samples_left;
+	gs_eparam_t *param_samples_right;
 	gs_eparam_t *param_movement_strength;
 	std::string shader_filepath;
 	gs_effect_t *effect = nullptr;
+	gs_texture_t *audio_freq_left_texture = nullptr;
+	gs_texture_t *audio_freq_right_texture = nullptr;
 
 	// Render-state guard (prevents update() vs video_render() races)
 	std::mutex render_mutex;

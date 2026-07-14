@@ -30,6 +30,9 @@ uniform Texture2D image; // Texture containing the source picture
 uniform float movement_strength = 0.5;
 uniform float max_sample_max = 0.5;
 
+uniform Texture2D samples_left;
+uniform Texture2D samples_right;
+
 // Size of the source picture
 uniform int width;
 uniform int height;
@@ -91,7 +94,8 @@ float4 pixel_shader_auviz(pixel_data pixel) : TARGET
     float new_red = source_sample.r + movement_strength * max_sample_max;
     float new_green = source_sample.g * movement_strength * max_sample_max;
     float new_blue = source_sample.b;
-   
+
+    new_red = samples_left.Sample(linear_clamp, pixel.uv[0]);
 
     return float4(new_red, new_green, new_blue, source_sample.a);
     //return float4(pixel.uv, 1.0, 1.0);
