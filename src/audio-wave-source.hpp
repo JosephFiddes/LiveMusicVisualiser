@@ -48,6 +48,8 @@ struct auviz_source {
 
 	// Additional parameters
 	double movement_strength;
+	double show_range_start;
+	double show_range_end;
 
 	// Effect parameters
 	gs_eparam_t *param_width;
@@ -55,6 +57,8 @@ struct auviz_source {
 	gs_eparam_t *param_samples_left;
 	gs_eparam_t *param_samples_right;
 	gs_eparam_t *param_movement_strength;
+	gs_eparam_t *param_show_range_start;
+	gs_eparam_t *param_show_range_end;
 	std::string shader_filepath;
 	gs_effect_t *effect = nullptr;
 	gs_texture_t *audio_freq_left_texture = nullptr;

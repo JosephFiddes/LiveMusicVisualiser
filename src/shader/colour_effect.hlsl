@@ -4,6 +4,9 @@
 
 // Constants
 #define PI 3.141592653589793238
+//#define RECIP_LOG_2_28801 0.0675044815101
+#define LOG_2_28801 14.8138312839
+#define RECIP_28800 0.0000347222222222
 
 // Uniform variables set by OBS (required)
 uniform float4x4 ViewProj; // View-projection matrix used in the vertex shader
@@ -29,6 +32,9 @@ uniform Texture2D image; // Texture containing the source picture
 
 uniform float movement_strength = 0.5;
 uniform float max_sample_max = 0.5;
+
+uniform float show_range_start = 0.0;
+uniform float show_range_end = 1.0;
 
 uniform Texture2D samples_left;
 uniform Texture2D samples_right;
@@ -89,13 +95,27 @@ pixel_data vertex_shader_auviz(vertex_data vertex)
 float4 pixel_shader_auviz(pixel_data pixel) : TARGET
 {
     float4 source_sample = image.Sample(linear_clamp, pixel.uv);
-    
-    // Change pixel colour based on max_sample_max.
-    float new_red = source_sample.r + movement_strength * max_sample_max;
-    float new_green = source_sample.g * movement_strength * max_sample_max;
-    float new_blue = source_sample.b;
 
-    new_red = samples_left.Sample(linear_clamp, pixel.uv[0]);
+    // Restrict the range
+    float sample_point_restricted = show_range_start + pixel.uv[0] * (show_range_end - show_range_start);
+
+    // Resize so that the frequencies are more evenly distributed on the log-domain.
+    float log_freqs_sample = (pow(2, sample_point_restricted * LOG_2_28801) - 1) * RECIP_28800;
+
+    float sample_point = log_freqs_sample;
+
+    float new_red = sqrt(sample_point) * movement_strength * samples_left.Sample(linear_clamp, sample_point);
+    float new_green = sample_point * movement_strength * samples_right.Sample(linear_clamp, sample_point);
+
+    // Streaks from the sky
+    new_red *= (1.0 - sqrt(pixel.uv[1]));
+    new_green *= (1.0 - pixel.uv[1]);
+
+    //new_red = floor(4 * new_red) / 3;
+
+    new_red = max(new_red, source_sample.r);
+    new_green = max(new_green, source_sample.g);
+    float new_blue = source_sample.b;
 
     return float4(new_red, new_green, new_blue, source_sample.a);
     //return float4(pixel.uv, 1.0, 1.0);

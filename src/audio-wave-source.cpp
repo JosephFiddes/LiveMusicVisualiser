@@ -301,8 +301,12 @@ static void auviz_source_render(void *data, gs_effect_t *effect)
 			if (s->audio_freq_left_texture) {
 				gs_texture_destroy(s->audio_freq_left_texture);
 				s->audio_freq_left_texture = nullptr;
+
+				gs_texture_destroy(s->audio_freq_right_texture);
+				s->audio_freq_right_texture = nullptr;
 			}
 			s->audio_freq_left_texture = gs_texture_create(fouriered_length, 1, GS_R32F, 1, nullptr, GS_DYNAMIC);
+			s->audio_freq_right_texture = gs_texture_create(fouriered_length, 1, GS_R32F, 1, nullptr, GS_DYNAMIC);
 		}
 
 		uint8_t *ptr = nullptr;
@@ -322,6 +326,7 @@ static void auviz_source_render(void *data, gs_effect_t *effect)
 			gs_effect_set_texture(s->param_samples_right, s->audio_freq_right_texture);
 		}
 
+		//obs_log(LOG_INFO, "%i samples collected.", s->num_samples);
 		//obs_log(LOG_INFO, "L%f.2 R%f.2", s->samples_left.back(), s->samples_right.back());
 
 		for (int i = 0; i < parameter_behaviours.size(); ++i) {
@@ -526,6 +531,54 @@ void register_audio_viz_source() {
 	);
 
 	add_parameter(
+		"show_range_start", "Show Range Start: ",
+		// on_create: run when source is created.
+		[](std::string name, std::string disp_name, auviz_source *s) { 
+			s->param_show_range_start = gs_effect_get_param_by_name_ensure_success(s->effect, name.c_str());
+		},
+		// get_default: sets the default value of the parameter in settings.
+		[](std::string name, std::string disp_name, obs_data_t *settings) {
+			obs_data_set_default_double(settings, name.c_str(), 0.0);
+		},
+		// get_properties: adds the parameter to the properties list (e.g. for dropdowns or sliders).
+		[](std::string name, std::string disp_name, obs_properties_t *props, auviz_source *s) { 
+			obs_properties_add_float_slider(props, name.c_str(), disp_name.c_str(), 0.0, 1.0, 0.01);
+		},
+		// on_update: run when the parameter is updated (e.g. slider moved).
+		[](std::string name, std::string disp_name, auviz_source *s, obs_data_t *settings) {
+			s->show_range_start = obs_data_get_double(settings, name.c_str());
+		},
+		// on_video_render: run when the source is rendered.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+			gs_effect_set_float(s->param_show_range_start, (float)s->show_range_start);
+		}
+	);
+
+	add_parameter(
+		"show_range_end", "Show Range End: ",
+		// on_create: run when source is created.
+		[](std::string name, std::string disp_name, auviz_source *s) { 
+			s->param_show_range_end = gs_effect_get_param_by_name_ensure_success(s->effect, name.c_str());
+		},
+		// get_default: sets the default value of the parameter in settings.
+		[](std::string name, std::string disp_name, obs_data_t *settings) {
+			obs_data_set_default_double(settings, name.c_str(), 1.0);
+		},
+		// get_properties: adds the parameter to the properties list (e.g. for dropdowns or sliders).
+		[](std::string name, std::string disp_name, obs_properties_t *props, auviz_source *s) { 
+			obs_properties_add_float_slider(props, name.c_str(), disp_name.c_str(), 0.0, 1.0, 0.01);
+		},
+		// on_update: run when the parameter is updated (e.g. slider moved).
+		[](std::string name, std::string disp_name, auviz_source *s, obs_data_t *settings) {
+			s->show_range_end = obs_data_get_double(settings, name.c_str());
+		},
+		// on_video_render: run when the source is rendered.
+		[](std::string name, std::string disp_name, auviz_source *s) {
+			gs_effect_set_float(s->param_show_range_end, (float)s->show_range_end);
+		}
+	);
+
+	add_parameter(
 		SHADER_FILEPATH_NAME, "Shader File: ",
 		// on_create: run when source is created.
 		[](std::string name, std::string disp_name, auviz_source *s) {
@@ -643,7 +696,7 @@ static std::vector<float> fft(const std::vector<float> & samples) {
 	// Discard imaginary part.
 	std::vector<float> result = std::vector<float>(n);
 	for (int i = 0; i < n; i++) {
-		result[i] = complex_samples[i].real();
+		result[i] = abs(complex_samples[i]);
 	}
 
 	return result;
